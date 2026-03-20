@@ -1,0 +1,28 @@
+# Data
+/target
+/dist
+**/*.rs.bk
+*.pdb
+
+# Handoff (architect ↔ coder)
+.handoff/
+
+# Project management (internal)
+pm/
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
