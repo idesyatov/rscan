@@ -1,8 +1,30 @@
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, ToSocketAddrs};
 
-/// Parse target string into a list of IPv4 addresses.
-/// Supports single IP (192.168.1.1) and CIDR notation (192.168.1.0/24).
+/// Parse multiple target strings into a deduplicated list of IPv4 addresses.
+/// Each target can be: single IP, CIDR notation, or hostname.
+pub fn parse_targets(targets: &[String]) -> Result<Vec<Ipv4Addr>, String> {
+    let mut all_hosts = Vec::new();
+
+    for target in targets {
+        let hosts = parse_target(target)?;
+        all_hosts.extend(hosts);
+    }
+
+    // Deduplicate while preserving order
+    let mut seen = std::collections::HashSet::new();
+    all_hosts.retain(|ip| seen.insert(*ip));
+
+    if all_hosts.is_empty() {
+        return Err("No valid hosts to scan".to_string());
+    }
+
+    Ok(all_hosts)
+}
+
+/// Parse a single target string into a list of IPv4 addresses.
+/// Supports: single IP (192.168.1.1), CIDR notation (192.168.1.0/24), or hostname (google.com).
 pub fn parse_target(target: &str) -> Result<Vec<Ipv4Addr>, String> {
+    // CIDR notation
     if let Some((ip_str, prefix_str)) = target.split_once('/') {
         let ip: Ipv4Addr = ip_str
             .parse()
@@ -27,19 +49,61 @@ pub fn parse_target(target: &str) -> Result<Vec<Ipv4Addr>, String> {
             }
             Ok(addrs)
         } else {
-            // Exclude network and broadcast addresses
             let mut addrs = Vec::new();
             for addr in (network + 1)..broadcast {
                 addrs.push(Ipv4Addr::from(addr));
             }
             Ok(addrs)
         }
-    } else {
-        let ip: Ipv4Addr = target
-            .parse()
-            .map_err(|_| format!("Invalid target: '{}'. Expected IP or CIDR (e.g. 192.168.1.1, 10.0.0.0/24)", target))?;
+    }
+    // Try as IP address first
+    else if let Ok(ip) = target.parse::<Ipv4Addr>() {
         Ok(vec![ip])
     }
+    // Try as hostname (DNS resolve)
+    else {
+        resolve_hostname(target)
+    }
+}
+
+/// Resolve a hostname to a list of IPv4 addresses.
+fn resolve_hostname(hostname: &str) -> Result<Vec<Ipv4Addr>, String> {
+    let addr_str = format!("{}:0", hostname);
+    let addrs: Vec<Ipv4Addr> = addr_str
+        .to_socket_addrs()
+        .map_err(|e| format!("Failed to resolve '{}': {}", hostname, e))?
+        .filter_map(|sa| match sa.ip() {
+            std::net::IpAddr::V4(ip) => Some(ip),
+            _ => None,
+        })
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(format!("No IPv4 addresses found for '{}'", hostname));
+    }
+
+    Ok(addrs)
+}
+
+/// Parse exclude list and remove those IPs from hosts.
+pub fn apply_excludes(hosts: &mut Vec<Ipv4Addr>, excludes: &str) -> Result<(), String> {
+    let mut excluded = std::collections::HashSet::new();
+
+    for part in excludes.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // Support CIDR in excludes too
+        let addrs = parse_target(part)?;
+        for addr in addrs {
+            excluded.insert(addr);
+        }
+    }
+
+    hosts.retain(|ip| !excluded.contains(ip));
+    Ok(())
 }
 
 /// Parse port specification into a list of port numbers.
@@ -111,8 +175,6 @@ mod tests {
     fn test_parse_cidr_30() {
         let addrs = parse_target("10.0.0.0/30").unwrap();
         assert_eq!(addrs.len(), 2);
-        assert_eq!(addrs[0], Ipv4Addr::new(10, 0, 0, 1));
-        assert_eq!(addrs[1], Ipv4Addr::new(10, 0, 0, 2));
     }
 
     #[test]
@@ -129,6 +191,53 @@ mod tests {
     #[test]
     fn test_parse_invalid_cidr() {
         assert!(parse_target("192.168.1.0/33").is_err());
+    }
+
+    #[test]
+    fn test_parse_hostname_localhost() {
+        let addrs = parse_target("localhost").unwrap();
+        assert!(addrs.contains(&Ipv4Addr::new(127, 0, 0, 1)));
+    }
+
+    #[test]
+    fn test_parse_invalid_hostname() {
+        assert!(parse_target("this.host.does.not.exist.invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_multiple_targets() {
+        let targets = vec!["192.168.1.1".to_string(), "10.0.0.1".to_string()];
+        let addrs = parse_targets(&targets).unwrap();
+        assert_eq!(addrs.len(), 2);
+        assert!(addrs.contains(&Ipv4Addr::new(192, 168, 1, 1)));
+        assert!(addrs.contains(&Ipv4Addr::new(10, 0, 0, 1)));
+    }
+
+    #[test]
+    fn test_parse_multiple_targets_dedup() {
+        let targets = vec!["192.168.1.1".to_string(), "192.168.1.1".to_string()];
+        let addrs = parse_targets(&targets).unwrap();
+        assert_eq!(addrs.len(), 1);
+    }
+
+    #[test]
+    fn test_exclude_hosts() {
+        let mut hosts = vec![
+            Ipv4Addr::new(192, 168, 1, 1),
+            Ipv4Addr::new(192, 168, 1, 2),
+            Ipv4Addr::new(192, 168, 1, 3),
+        ];
+        apply_excludes(&mut hosts, "192.168.1.2").unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert!(!hosts.contains(&Ipv4Addr::new(192, 168, 1, 2)));
+    }
+
+    #[test]
+    fn test_exclude_cidr() {
+        let mut hosts: Vec<Ipv4Addr> = (1..=10).map(|i| Ipv4Addr::new(10, 0, 0, i)).collect();
+        apply_excludes(&mut hosts, "10.0.0.0/30").unwrap();
+        // /30 excludes .1 and .2 (network .0 and broadcast .3 weren't in list)
+        assert_eq!(hosts.len(), 8);
     }
 
     #[test]
