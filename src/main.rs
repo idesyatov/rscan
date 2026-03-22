@@ -11,71 +11,71 @@ use std::time::{Duration, Instant};
 #[command(name = "rscan", version, about = "Fast CLI port scanner")]
 struct Cli {
     /// Targets: IP addresses, CIDR subnets, or hostnames (multiple allowed)
-    #[arg(required = true)]
+    #[arg(required_unless_present = "target_file", help_heading = "Target")]
     targets: Vec<String>,
 
+    /// Read targets from file (one per line; IPs, CIDRs, hostnames; # for comments)
+    #[arg(short = 'i', long = "target-file", alias = "iL", help_heading = "Target")]
+    target_file: Option<String>,
+
+    /// Exclude hosts (comma-separated IPs or CIDRs)
+    #[arg(long, help_heading = "Target")]
+    exclude: Option<String>,
+
     /// Ports to scan: single (80), list (22,80,443), or range (1-1024)
-    #[arg(short, long, default_value = "1-1024")]
+    #[arg(short, long, default_value = "1-1024", help_heading = "Ports")]
     ports: String,
 
+    /// Scan top N most common ports (overrides -p)
+    #[arg(long, help_heading = "Ports")]
+    top: Option<usize>,
+
     /// Connection timeout in milliseconds
-    #[arg(short, long, default_value_t = 1000)]
+    #[arg(short, long, default_value_t = 1000, help_heading = "Scan")]
     timeout: u64,
 
     /// Max concurrent connections
-    #[arg(short = 'j', long = "threads", default_value_t = 100)]
+    #[arg(short = 'j', long = "threads", default_value_t = 100, help_heading = "Scan")]
     threads: usize,
 
-    /// Scan top N most common ports (overrides -p)
-    #[arg(long)]
-    top: Option<usize>,
-
     /// Grab service banners from open ports
-    #[arg(short, long)]
+    #[arg(short, long, help_heading = "Scan")]
     banner: bool,
 
-    /// Exclude hosts (comma-separated IPs or CIDRs)
-    #[arg(long)]
-    exclude: Option<String>,
-
     /// Ping check: discover alive hosts before scanning
-    #[arg(long)]
+    #[arg(long, help_heading = "Scan")]
     ping: bool,
 
     /// Retry count for timed-out ports
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, help_heading = "Scan")]
     retry: u32,
 
     /// Max connections per second (0 = unlimited)
-    #[arg(long)]
+    #[arg(long, help_heading = "Scan")]
     rate: Option<u32>,
 
-    /// Fast profile: --top 100, timeout 200ms, 200 threads
-    #[arg(long)]
+    /// Scan profile: fast, full, or stealth
+    #[arg(long, help_heading = "Profile")]
+    profile: Option<String>,
+
+    /// [hidden] Alias for --profile fast
+    #[arg(long, hide = true)]
     fast: bool,
 
-    /// Full profile: all 65535 ports, timeout 2000ms
-    #[arg(long)]
+    /// [hidden] Alias for --profile full
+    #[arg(long, hide = true)]
     full: bool,
 
     /// Output results as JSON
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     json: bool,
 
-    /// Save results to a text file
-    #[arg(short, long)]
-    output: Option<String>,
-
-    /// Save results to a JSON file
-    #[arg(long)]
-    json_file: Option<String>,
-
-    /// Save results to a CSV file
-    #[arg(long)]
-    csv_file: Option<String>,
+    /// Save results to file (format by extension: .txt, .json, .csv)
+    #[arg(short, long, help_heading = "Output")]
+    output: Vec<String>,
 
     /// Verbose output
-    #[arg(short, long)]
+    #[arg(short, long, help_heading = "Output")]
     verbose: bool,
 }
 
@@ -83,20 +83,60 @@ struct Cli {
 async fn main() {
     let mut cli = Cli::parse();
 
-    // Apply profiles (override defaults)
-    if cli.fast {
-        if cli.top.is_none() { cli.top = Some(100); }
-        if cli.timeout == 1000 { cli.timeout = 200; }
-        if cli.threads == 100 { cli.threads = 200; }
-    }
-    if cli.full {
-        cli.ports = "1-65535".to_string();
-        cli.top = None;
-        if cli.timeout == 1000 { cli.timeout = 2000; }
+    // Hidden aliases for backward compatibility
+    if cli.fast { cli.profile = Some("fast".to_string()); }
+    if cli.full { cli.profile = Some("full".to_string()); }
+
+    // Apply profiles
+    match cli.profile.as_deref() {
+        Some("fast") => {
+            if cli.top.is_none() { cli.top = Some(100); }
+            if cli.timeout == 1000 { cli.timeout = 200; }
+            if cli.threads == 100 { cli.threads = 200; }
+        }
+        Some("full") => {
+            cli.ports = "1-65535".to_string();
+            cli.top = None;
+            if cli.timeout == 1000 { cli.timeout = 2000; }
+        }
+        Some("stealth") => {
+            if cli.top.is_none() { cli.top = Some(20); }
+            if cli.timeout == 1000 { cli.timeout = 3000; }
+            if cli.threads == 100 { cli.threads = 10; }
+            if cli.rate.is_none() { cli.rate = Some(10); }
+        }
+        Some(unknown) => {
+            eprintln!("Error: unknown profile '{}'. Available: fast, full, stealth", unknown);
+            std::process::exit(1);
+        }
+        None => {}
     }
 
-    // Parse targets (multiple)
-    let mut hosts = match network::parse_targets(&cli.targets) {
+    // Collect targets: from CLI args + from file
+    let mut all_targets = cli.targets.clone();
+
+    if let Some(ref path) = cli.target_file {
+        match network::load_targets_from_file(path) {
+            Ok(file_targets) => {
+                if cli.verbose {
+                    eprintln!("Loaded {} target(s) from {}", file_targets.len(), path);
+                }
+                all_targets.extend(file_targets);
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if all_targets.is_empty() {
+        eprintln!("Error: no targets specified (use positional args or --target-file)");
+        std::process::exit(1);
+    }
+
+    // Parse targets
+    let mut hosts = match network::parse_targets(&all_targets) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -135,7 +175,7 @@ async fn main() {
 
     // Verbose: show resolved info
     if cli.verbose {
-        for target in &cli.targets {
+        for target in &all_targets {
             if target.parse::<std::net::Ipv4Addr>().is_err() && !target.contains('/') {
                 if let Ok(resolved) = network::parse_target(target) {
                     eprintln!("Resolved {} → {}", target, resolved.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(", "));
@@ -147,8 +187,14 @@ async fn main() {
         if cli.ping { flags.push("ping"); }
         if cli.retry > 0 { flags.push("retry"); }
         if cli.rate.is_some() { flags.push("rate-limit"); }
-        if cli.fast { flags.push("FAST"); }
-        if cli.full { flags.push("FULL"); }
+        if let Some(ref profile) = cli.profile {
+            flags.push(match profile.as_str() {
+                "fast" => "FAST",
+                "full" => "FULL",
+                "stealth" => "STEALTH",
+                _ => "CUSTOM",
+            });
+        }
 
         eprintln!(
             "Scanning {} host(s), {} port(s), timeout {}ms, {} threads{}",
@@ -195,24 +241,15 @@ async fn main() {
         output::print_text(&results, hosts.len(), ports.len(), elapsed);
     }
 
-    // Save to files
-    if let Some(ref path) = cli.output {
-        match output::save_text(&results, hosts.len(), ports.len(), elapsed, path) {
+    // Save to files (format detected by extension)
+    for path in &cli.output {
+        let result = match output::detect_format(path) {
+            "json" => output::save_json(&results, path),
+            "csv" => output::save_csv(&results, path),
+            _ => output::save_text(&results, hosts.len(), ports.len(), elapsed, path),
+        };
+        match result {
             Ok(()) => eprintln!("Results saved to {}", path),
-            Err(e) => eprintln!("Error: {}", e),
-        }
-    }
-
-    if let Some(ref path) = cli.json_file {
-        match output::save_json(&results, path) {
-            Ok(()) => eprintln!("JSON results saved to {}", path),
-            Err(e) => eprintln!("Error: {}", e),
-        }
-    }
-
-    if let Some(ref path) = cli.csv_file {
-        match output::save_csv(&results, path) {
-            Ok(()) => eprintln!("CSV results saved to {}", path),
             Err(e) => eprintln!("Error: {}", e),
         }
     }

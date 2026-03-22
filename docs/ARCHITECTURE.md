@@ -1,78 +1,79 @@
 # Архитектура — rscan
 
 ## Назначение
-CLI port scanner. Сканирование TCP-портов на хосте или в подсети.
+CLI port scanner. TCP-сканирование портов на хостах, подсетях, hostname.
 
 ## Стек
 - **Язык:** Rust (stable)
 - **Async runtime:** tokio (multi-threaded)
 - **CLI:** clap (derive API)
 - **Сериализация:** serde + serde_json
-- **Сборка:** Docker-only (Rust/Cargo на хосте не требуются)
-- **Кросс-компиляция:** mingw-w64 для Windows-таргета
-- **Целевые платформы:** Linux (x86_64-unknown-linux-gnu), Windows (x86_64-pc-windows-gnu)
+- **Цветной вывод:** colored
+- **Сборка:** Docker-only, multi-stage (rust:latest → debian:bookworm-slim)
+- **Кросс-компиляция:** mingw-w64 для Windows
+- **Платформы:** Linux (x86_64), Windows (x86_64)
 
 ## Модули
 
 ### main.rs — точка входа
-- Определение CLI-интерфейса через clap (derive)
-- Валидация входных данных
-- Запуск async runtime, вызов сканера, вывод результатов
+- CLI через clap derive: множественные targets, все флаги
+- Профили сканирования: --fast (top100, 200ms, 200 threads), --full (65535, 2s)
+- Оркестрация: parse targets → exclude → ping → scan → output
 
 ### scanner.rs — логика сканирования
-- `scan_host(ip, ports, timeout)` — сканирование списка портов на одном хосте
-- `scan_port(ip, port, timeout)` — TCP connect к одному порту
-- Параллельное сканирование через tokio tasks с ограничением concurrency (semaphore)
+- `ScanConfig` — конфигурация (timeout, concurrency, banners, retries, rate)
+- `scan()` — async параллельное сканирование с semaphore
+- `scan_port()` — TCP connect с retry
+- `grab_banner_from_stream()` — чтение первой строки от сервиса
+- `ping_host()` / `discover_hosts()` — TCP ping на 80/443/22
+- Rate limiting через задержку между spawn
 
 ### network.rs — работа с адресами
-- Парсинг одиночного IP-адреса
-- Парсинг CIDR-нотации (192.168.1.0/24) → список IP
-- Парсинг портов: одиночный (80), список (22,80,443), диапазон (1-1024)
+- `parse_targets()` — множественные цели, дедупликация
+- `parse_target()` — IP, CIDR, hostname (DNS resolve)
+- `apply_excludes()` — исключение хостов (IP, CIDR)
+- `parse_ports()` — одиночный, список, диапазон, смешанный
 
 ### output.rs — вывод результатов
-- Текстовый формат (таблица: host, port, status)
-- JSON-формат (массив объектов)
-- Verbose-режим (прогресс сканирования)
+- `print_text()` — цветная таблица (colored): green/open, yellow/service, cyan/port
+- `print_json()` — JSON в stdout
+- `save_text()` — plain text в файл (без цветов)
+- `save_json()` — JSON в файл
+- `save_csv()` — CSV в файл
+
+### services.rs — маппинг сервисов
+- `lookup(port)` — 100+ записей (ssh, http, mysql, redis, kubernetes...)
+- `top_ports(n)` — топ-N портов по частотности (данные nmap)
 
 ## CLI-интерфейс
 ```
-rscan <TARGET> [OPTIONS]
+rscan <TARGET>... [OPTIONS]
 
 Arguments:
-  <TARGET>    IP-адрес или подсеть в CIDR (192.168.1.1, 10.0.0.0/24)
+  <TARGET>...   IP, CIDR, или hostname (множественные)
 
 Options:
-  -p, --ports <PORTS>      Порты: 80 | 22,80,443 | 1-1024 [default: 1-1024]
-  -t, --timeout <MS>       Таймаут соединения в мс [default: 1000]
-  -j, --threads <NUM>      Макс. параллельных соединений [default: 100]
-      --json               Вывод в JSON
+  -p, --ports <PORTS>      Порты [default: 1-1024]
+  --top <N>                Топ-N портов (вместо -p)
+  -b, --banner             Захват баннеров
+  --ping                   TCP ping discovery
+  --exclude <HOSTS>        Исключить хосты
+  --retry <N>              Повторы при таймауте [default: 0]
+  --rate <N>               Макс. соединений/сек
+  --fast                   Профиль: top100, 200ms, 200 threads
+  --full                   Профиль: 1-65535, 2000ms
+  -t, --timeout <MS>       Таймаут [default: 1000]
+  -j, --threads <NUM>      Параллельность [default: 100]
+  --json                   JSON в stdout
+  -o, --output <FILE>      Текст в файл
+  --json-file <FILE>       JSON в файл
+  --csv-file <FILE>        CSV в файл
   -v, --verbose            Подробный вывод
-  -h, --help               Справка
-  -V, --version            Версия
 ```
-
-## Алгоритм работы
-1. Парсинг аргументов (clap)
-2. Парсинг target → список IP-адресов (network.rs)
-3. Парсинг портов → список портов (network.rs)
-4. Для каждого IP × порт → async TCP connect с таймаутом (scanner.rs)
-5. Сбор результатов → форматирование и вывод (output.rs)
-
-## Ограничение concurrency
-Semaphore (tokio::sync::Semaphore) ограничивает количество одновременных TCP-соединений. По умолчанию 100, настраивается через --threads.
 
 ## Сборка и дистрибуция
 - **На хосте Rust/Cargo НЕ установлены**
-- Сборка: `docker build -t rscan-builder . && docker run --rm -v ./dist:/dist rscan-builder`
-- Пересборка без кэша: `docker build --no-cache -t rscan-builder .`
-- Dockerfile на базе `rust:latest` + `gcc-mingw-w64-x86-64` для Windows-таргета
-- Внутри контейнера: две сборки — Linux (native) и Windows (cross-compile)
-- Результат выводится через volume mount в `./dist/`:
-  - `./dist/linux/rscan` — Linux ELF x86_64
-  - `./dist/windows/rscan.exe` — Windows PE x86_64
-- Docker НЕ используется для запуска утилиты — только для сборки
-
-## Тестирование
-- Unit-тесты: запуск через Docker (Linux-сборка)
-- Парсинг адресов, портов, CIDR
-- Integration-тесты: сканирование localhost
+- `docker build -t rscan-builder . && docker run --rm -v ./dist:/dist rscan-builder`
+- Multi-stage: builder (rust:latest + mingw) → slim (debian:bookworm-slim)
+- Кэширование зависимостей через dummy main.rs
+- `./dist/linux/rscan` + `./dist/windows/rscan.exe`

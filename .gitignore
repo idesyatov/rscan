@@ -4,11 +4,17 @@
 **/*.rs.bk
 *.pdb
 
+# Docker on Windows artifacts
+*;C
+
 # Handoff (architect ↔ coder)
 .handoff/
 
 # Project management (internal)
 pm/
+
+# Architecture Decision Records (internal)
+docs/ADR-*
 
 # Claude
 .claude/

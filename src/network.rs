@@ -21,6 +21,26 @@ pub fn parse_targets(targets: &[String]) -> Result<Vec<Ipv4Addr>, String> {
     Ok(all_hosts)
 }
 
+/// Load targets from a file (one per line).
+/// Supports IPs, CIDRs, hostnames. Blank lines and lines starting with # are ignored.
+pub fn load_targets_from_file(path: &str) -> Result<Vec<String>, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read target file '{}': {}", path, e))?;
+
+    let targets: Vec<String> = content
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.to_string())
+        .collect();
+
+    if targets.is_empty() {
+        return Err(format!("No targets found in file '{}'", path));
+    }
+
+    Ok(targets)
+}
+
 /// Parse a single target string into a list of IPv4 addresses.
 /// Supports: single IP (192.168.1.1), CIDR notation (192.168.1.0/24), or hostname (google.com).
 pub fn parse_target(target: &str) -> Result<Vec<Ipv4Addr>, String> {
@@ -95,7 +115,6 @@ pub fn apply_excludes(hosts: &mut Vec<Ipv4Addr>, excludes: &str) -> Result<(), S
             continue;
         }
 
-        // Support CIDR in excludes too
         let addrs = parse_target(part)?;
         for addr in addrs {
             excluded.insert(addr);
@@ -236,7 +255,6 @@ mod tests {
     fn test_exclude_cidr() {
         let mut hosts: Vec<Ipv4Addr> = (1..=10).map(|i| Ipv4Addr::new(10, 0, 0, i)).collect();
         apply_excludes(&mut hosts, "10.0.0.0/30").unwrap();
-        // /30 excludes .1 and .2 (network .0 and broadcast .3 weren't in list)
         assert_eq!(hosts.len(), 8);
     }
 

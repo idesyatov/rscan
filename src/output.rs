@@ -166,6 +166,17 @@ pub fn save_csv(results: &[PortResult], path: &str) -> Result<(), String> {
     write_file(path, &content)
 }
 
+/// Detect output format from file extension.
+pub fn detect_format(path: &str) -> &'static str {
+    if path.ends_with(".json") {
+        "json"
+    } else if path.ends_with(".csv") {
+        "csv"
+    } else {
+        "text"
+    }
+}
+
 fn write_file(path: &str, content: &str) -> Result<(), String> {
     let mut file = std::fs::File::create(path)
         .map_err(|e| format!("Failed to create file '{}': {}", path, e))?;

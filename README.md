@@ -5,18 +5,20 @@ Fast CLI port scanner written in Rust. Scans TCP ports on hosts, hostnames, or a
 ## Features
 
 - **Multiple targets**: scan several hosts, subnets, and hostnames in one command
+- **Target file**: load hosts from a file (`-i hosts.txt`)
 - **DNS resolution** for hostnames
 - **Flexible ports**: single (`80`), list (`22,80,443`), range (`1-1024`), mixed, or top-N
 - **Service detection**: identifies well-known services by port number
 - **Banner grabbing**: reads service version banners from open ports
 - **Host discovery**: TCP ping check before scanning (`--ping`)
 - **Exclude hosts**: skip specific IPs or subnets (`--exclude`)
-- **Scan profiles**: `--fast` and `--full` presets
+- **Scan profiles**: `--profile fast`, `full`, `stealth`
 - **Retry**: retry timed-out connections (`--retry`)
 - **Rate limiting**: cap connections per second (`--rate`)
 - **Colored terminal output**
 - **Multiple output formats**: text, JSON, CSV
-- **File output**: save to text, JSON, or CSV files
+- **Auto-detect format**: `-o scan.json` saves JSON, `-o scan.csv` saves CSV
+- **Multiple outputs**: `-o scan.txt -o scan.json -o scan.csv` in one command
 - Cross-platform: Linux and Windows binaries from a single Docker build
 
 ## Requirements
@@ -27,14 +29,18 @@ Fast CLI port scanner written in Rust. Scans TCP ports on hosts, hostnames, or a
 
 ```bash
 docker build -t rscan-builder .
+
+# Linux / macOS
 docker run --rm -v ./dist:/dist rscan-builder
+
+# Windows (PowerShell)
+docker run --rm -v "${PWD}/dist:/dist" rscan-builder
 ```
 
 Rebuild from scratch:
 
 ```bash
 docker build --no-cache -t rscan-builder .
-docker run --rm -v ./dist:/dist rscan-builder
 ```
 
 Binaries appear in `./dist/`:
@@ -49,36 +55,79 @@ dist/
 
 ```bash
 rscan <TARGET>... [OPTIONS]
+rscan -i targets.txt [OPTIONS]
 ```
 
-### Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `TARGET` | One or more: IP address, hostname, or CIDR subnet |
-
 ### Options
+
+**Target:**
+
+| Option | Description |
+|--------|-------------|
+| `<TARGET>...` | IP, CIDR, or hostname (multiple allowed) |
+| `-i, --target-file <FILE>` | Read targets from file |
+| `--exclude <HOSTS>` | Exclude IPs/CIDRs (comma-separated) |
+
+**Ports:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-p, --ports <PORTS>` | `1-1024` | Ports: `80`, `22,80,443`, `1-1024` |
-| `--top <N>` | — | Scan top N most common ports (overrides `-p`) |
-| `-b, --banner` | — | Grab service banners |
-| `--ping` | — | Discover alive hosts before scanning |
-| `--exclude <HOSTS>` | — | Exclude IPs or CIDRs (comma-separated) |
-| `--retry <N>` | `0` | Retry timed-out ports N times |
-| `--rate <N>` | — | Max connections per second |
-| `--fast` | — | Fast profile: top 100 ports, 200ms timeout, 200 threads |
-| `--full` | — | Full profile: all 65535 ports, 2s timeout |
+| `--top <N>` | — | Scan top N most common ports |
+
+**Scan:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
 | `-t, --timeout <MS>` | `1000` | Connection timeout in milliseconds |
 | `-j, --threads <NUM>` | `100` | Max concurrent connections |
-| `--json` | — | Output as JSON |
-| `-o, --output <FILE>` | — | Save text results to file |
-| `--json-file <FILE>` | — | Save JSON results to file |
-| `--csv-file <FILE>` | — | Save CSV results to file |
-| `-v, --verbose` | — | Show progress and details |
+| `-b, --banner` | — | Grab service banners |
+| `--ping` | — | Discover alive hosts first |
+| `--retry <N>` | `0` | Retry timed-out ports N times |
+| `--rate <N>` | — | Max connections per second |
+
+**Profile:**
+
+| Option | Description |
+|--------|-------------|
+| `--profile fast` | Top 100 ports, 200ms timeout, 200 threads |
+| `--profile full` | All 65535 ports, 2s timeout |
+| `--profile stealth` | Top 20, 3s timeout, 10 threads, 10 conn/s |
+
+**Output:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output JSON to stdout |
+| `-o, --output <FILE>` | Save to file (format by extension: .txt, .json, .csv) |
+| `-v, --verbose` | Show progress and details |
+
+### Target file format
+
+```
+# hosts.txt — one target per line
+# Comments start with #, blank lines are ignored
+
+192.168.1.1
+192.168.1.0/24
+10.0.0.1
+google.com
+example.com
+```
 
 ### Examples
+
+Scan from a target file:
+
+```bash
+rscan -i hosts.txt -p 80,443
+```
+
+Combine file and CLI targets:
+
+```bash
+rscan 10.0.0.1 -i hosts.txt --top 20 -b
+```
 
 Scan multiple targets:
 
@@ -89,13 +138,19 @@ rscan 192.168.1.1 10.0.0.1 google.com -p 80,443
 Fast scan with banner grabbing:
 
 ```bash
-rscan 192.168.1.0/24 --fast -b
+rscan 192.168.1.0/24 --profile fast -b
 ```
 
 Full scan of all ports:
 
 ```bash
-rscan 10.0.0.1 --full
+rscan 10.0.0.1 --profile full
+```
+
+Stealth scan:
+
+```bash
+rscan 10.0.0.0/24 --profile stealth
 ```
 
 Scan subnet with ping discovery, excluding gateway:
@@ -110,10 +165,10 @@ Rate-limited scan with retries:
 rscan 10.0.0.0/24 --top 20 --rate 500 --retry 2
 ```
 
-Export to all formats:
+Export to all formats in one command:
 
 ```bash
-rscan 192.168.1.1 --top 50 -b -o scan.txt --json-file scan.json --csv-file scan.csv
+rscan google.com --top 50 -b -o scan.txt -o scan.json -o scan.csv
 ```
 
 JSON output:
@@ -142,24 +197,26 @@ rscan google.com --top 10 --json -b
 
 ## Scan profiles
 
-| Profile | Ports | Timeout | Threads |
-|---------|-------|---------|---------|
-| default | 1-1024 | 1000ms | 100 |
-| `--fast` | top 100 | 200ms | 200 |
-| `--full` | 1-65535 | 2000ms | 100 |
+| Profile | Ports | Timeout | Threads | Rate |
+|---------|-------|---------|---------|------|
+| default | 1-1024 | 1000ms | 100 | — |
+| fast | top 100 | 200ms | 200 | — |
+| full | 1-65535 | 2000ms | 100 | — |
+| stealth | top 20 | 3000ms | 10 | 10/s |
 
 Profiles set defaults — explicit flags still override them.
 
 ## How it works
 
-1. Resolves targets — DNS for hostnames, CIDR expansion for subnets
-2. Optionally discovers alive hosts via TCP ping (`--ping`)
+1. Collects targets from CLI arguments and/or target file (`-i`)
+2. Resolves hostnames via DNS, expands CIDRs
 3. Applies host exclusions (`--exclude`)
-4. Selects ports: explicit, range, or top-N by frequency
-5. Scans each IP × port with async TCP connect, retries, and rate limiting
-6. Optionally reads service banners from open ports
-7. Identifies services by port number
-8. Outputs colored results to terminal and/or saves to files
+4. Optionally discovers alive hosts via TCP ping (`--ping`)
+5. Selects ports: explicit, range, or top-N by frequency
+6. Scans each IP × port with async TCP connect, retries, and rate limiting
+7. Optionally reads service banners from open ports
+8. Identifies services by port number
+9. Outputs colored results to terminal and/or saves to files
 
 ## Tech stack
 
