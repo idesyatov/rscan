@@ -28,16 +28,26 @@ jobs:
       - name: Build Windows
         run: cargo build --release --target x86_64-pc-windows-gnu
 
-      - name: Prepare binaries
+      - name: Package archives
         run: |
-          mkdir -p artifacts
-          cp target/release/rscan artifacts/rscan-linux-amd64
-          cp target/x86_64-pc-windows-gnu/release/rscan.exe artifacts/rscan-windows-amd64.exe
+          TAG=${GITHUB_REF#refs/tags/}
+
+          # Linux: tar.gz
+          mkdir -p rscan-${TAG}-linux-amd64
+          cp target/release/rscan rscan-${TAG}-linux-amd64/
+          cp LICENSE rscan-${TAG}-linux-amd64/
+          tar czf rscan-${TAG}-linux-amd64.tar.gz rscan-${TAG}-linux-amd64/
+
+          # Windows: zip
+          mkdir -p rscan-${TAG}-windows-amd64
+          cp target/x86_64-pc-windows-gnu/release/rscan.exe rscan-${TAG}-windows-amd64/
+          cp LICENSE rscan-${TAG}-windows-amd64/
+          zip -r rscan-${TAG}-windows-amd64.zip rscan-${TAG}-windows-amd64/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/rscan-linux-amd64
-            artifacts/rscan-windows-amd64.exe
+            rscan-*.tar.gz
+            rscan-*.zip
           generate_release_notes: true

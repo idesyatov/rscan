@@ -177,6 +177,40 @@ pub fn detect_format(path: &str) -> &'static str {
     }
 }
 
+/// Quiet mode: output only ip:port lines (for scripting).
+pub fn print_quiet(results: &[PortResult]) {
+    for r in results {
+        println!("{}:{}", r.ip, r.port);
+    }
+}
+
+/// Print diff between current scan and baseline.
+pub fn print_diff(new_open: &[&PortResult], now_closed: &[(String, u16)], unchanged: usize, baseline_path: &str) {
+    println!();
+    println!("{}", format!("DIFF against {}:", baseline_path).bold());
+    println!();
+
+    if !new_open.is_empty() {
+        println!("  {} {}", "[+]".green().bold(), "NEW OPEN:".green());
+        for r in new_open {
+            let service = services::lookup(r.port).unwrap_or("-");
+            println!("      {}:{:<8} {}", r.ip.to_string().white(), r.port, service.yellow());
+        }
+        println!();
+    }
+
+    if !now_closed.is_empty() {
+        println!("  {} {}", "[-]".red().bold(), "NOW CLOSED:".red());
+        for (host, port) in now_closed {
+            let service = services::lookup(*port).unwrap_or("-");
+            println!("      {}:{:<8} {}", host.white(), port, service.yellow());
+        }
+        println!();
+    }
+
+    println!("  {} {} {} open ports", "[=]".dimmed(), "UNCHANGED:".dimmed(), unchanged);
+}
+
 fn write_file(path: &str, content: &str) -> Result<(), String> {
     let mut file = std::fs::File::create(path)
         .map_err(|e| format!("Failed to create file '{}': {}", path, e))?;

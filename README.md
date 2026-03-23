@@ -10,6 +10,7 @@ Fast CLI port scanner written in Rust. Scans TCP ports on hosts, hostnames, or a
 - **Flexible ports**: single (`80`), list (`22,80,443`), range (`1-1024`), mixed, or top-N
 - **Service detection**: identifies well-known services by port number
 - **Banner grabbing**: reads service version banners from open ports
+- **HTTP probe**: active banner grabbing for web servers
 - **Host discovery**: TCP ping check before scanning (`--ping`)
 - **Exclude hosts**: skip specific IPs or subnets (`--exclude`)
 - **Scan profiles**: `--profile fast`, `full`, `stealth`
@@ -19,6 +20,9 @@ Fast CLI port scanner written in Rust. Scans TCP ports on hosts, hostnames, or a
 - **Multiple output formats**: text, JSON, CSV
 - **Auto-detect format**: `-o scan.json` saves JSON, `-o scan.csv` saves CSV
 - **Multiple outputs**: `-o scan.txt -o scan.json -o scan.csv` in one command
+- **Diff mode**: compare scans to detect changes (`--diff`)
+- **Quiet mode**: machine-friendly output for pipelines (`-q`)
+- **Progress bar**: visual scan progress with ETA
 - Cross-platform: Linux and Windows binaries from a single Docker build
 
 ## Installation
@@ -116,6 +120,8 @@ rscan -i targets.txt [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--json` | Output JSON to stdout |
+| `-q, --quiet` | Output only ip:port (for scripting) |
+| `--diff <FILE>` | Compare with previous scan (JSON) |
 | `-o, --output <FILE>` | Save to file (format by extension: .txt, .json, .csv) |
 | `-v, --verbose` | Show progress and details |
 
@@ -186,6 +192,21 @@ Export to all formats in one command:
 
 ```bash
 rscan google.com --top 50 -b -o scan.txt -o scan.json -o scan.csv
+```
+
+Quiet mode for scripting:
+
+```bash
+rscan 10.0.0.0/24 -p 80 -q | xargs -I{} curl -s http://{}
+```
+
+Diff mode — detect changes:
+
+```bash
+# Save baseline
+rscan 192.168.1.0/24 --top 20 -o baseline.json
+# Later — compare
+rscan 192.168.1.0/24 --top 20 --diff baseline.json
 ```
 
 JSON output:

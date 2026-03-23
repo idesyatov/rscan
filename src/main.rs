@@ -2,6 +2,7 @@ mod scanner;
 mod network;
 mod output;
 mod services;
+mod diff;
 
 use clap::Parser;
 use std::time::{Duration, Instant};
@@ -70,6 +71,14 @@ struct Cli {
     #[arg(long, help_heading = "Output")]
     json: bool,
 
+    /// Quiet mode: output only ip:port lines (for scripting)
+    #[arg(short, long, help_heading = "Output")]
+    quiet: bool,
+
+    /// Compare with previous scan (JSON file)
+    #[arg(long, help_heading = "Output")]
+    diff: Option<String>,
+
     /// Save results to file (format by extension: .txt, .json, .csv)
     #[arg(short, long, help_heading = "Output")]
     output: Vec<String>,
@@ -82,6 +91,17 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let mut cli = Cli::parse();
+
+    // Validate conflicting flags
+    if cli.quiet && cli.json {
+        eprintln!("Error: --quiet and --json cannot be used together");
+        std::process::exit(1);
+    }
+
+    // Quiet mode suppresses verbose
+    if cli.quiet {
+        cli.verbose = false;
+    }
 
     // Hidden aliases for backward compatibility
     if cli.fast { cli.profile = Some("fast".to_string()); }
@@ -235,10 +255,28 @@ async fn main() {
     let elapsed = start.elapsed();
 
     // Output to stdout
-    if cli.json {
+    if cli.quiet {
+        output::print_quiet(&results);
+    } else if cli.json {
         output::print_json(&results);
     } else {
         output::print_text(&results, hosts.len(), ports.len(), elapsed);
+    }
+
+    // Diff mode
+    if let Some(ref baseline_path) = cli.diff {
+        match diff::load_baseline(baseline_path) {
+            Ok(baseline) => {
+                let (new_open, now_closed, unchanged) = diff::compare(&results, &baseline);
+                if !cli.quiet {
+                    output::print_diff(&new_open, &now_closed, unchanged, baseline_path);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
     }
 
     // Save to files (format detected by extension)
