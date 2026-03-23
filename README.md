@@ -21,11 +21,28 @@ Fast CLI port scanner written in Rust. Scans TCP ports on hosts, hostnames, or a
 - **Multiple outputs**: `-o scan.txt -o scan.json -o scan.csv` in one command
 - Cross-platform: Linux and Windows binaries from a single Docker build
 
-## Requirements
+## Installation
 
-- [Docker](https://docs.docker.com/get-docker/) — that's it. No Rust toolchain needed.
+### From GitHub Releases
 
-## Build
+Download the latest binary for your platform from [Releases](https://github.com/idesyatov/rscan/releases):
+
+- **Linux**: `rscan-linux-amd64`
+- **Windows**: `rscan-windows-amd64.exe`
+
+```bash
+# Linux
+curl -L https://github.com/idesyatov/rscan/releases/latest/download/rscan-linux-amd64 -o rscan
+chmod +x rscan
+sudo mv rscan /usr/local/bin/
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri https://github.com/idesyatov/rscan/releases/latest/download/rscan-windows-amd64.exe -OutFile rscan.exe
+```
+
+### Build from source
+
+Requires [Docker](https://docs.docker.com/get-docker/) — no Rust toolchain needed.
 
 ```bash
 docker build -t rscan-builder .
