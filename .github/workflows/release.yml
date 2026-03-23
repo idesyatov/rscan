@@ -36,12 +36,14 @@ jobs:
           mkdir -p rscan-${TAG}-linux-amd64
           cp target/release/rscan rscan-${TAG}-linux-amd64/
           cp LICENSE rscan-${TAG}-linux-amd64/
+          cp README.md rscan-${TAG}-linux-amd64/
           tar czf rscan-${TAG}-linux-amd64.tar.gz rscan-${TAG}-linux-amd64/
 
           # Windows: zip
           mkdir -p rscan-${TAG}-windows-amd64
           cp target/x86_64-pc-windows-gnu/release/rscan.exe rscan-${TAG}-windows-amd64/
           cp LICENSE rscan-${TAG}-windows-amd64/
+          cp README.md rscan-${TAG}-windows-amd64/
           zip -r rscan-${TAG}-windows-amd64.zip rscan-${TAG}-windows-amd64/
 
       - name: Create Release

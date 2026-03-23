@@ -29,19 +29,23 @@ Fast CLI port scanner written in Rust. Scans TCP ports on hosts, hostnames, or a
 
 ### From GitHub Releases
 
-Download the latest binary for your platform from [Releases](https://github.com/idesyatov/rscan/releases):
+Download the latest archive for your platform from [Releases](https://github.com/idesyatov/rscan/releases):
 
-- **Linux**: `rscan-linux-amd64`
-- **Windows**: `rscan-windows-amd64.exe`
+- **Linux**: `rscan-vX.Y.Z-linux-amd64.tar.gz`
+- **Windows**: `rscan-vX.Y.Z-windows-amd64.zip`
 
 ```bash
 # Linux
-curl -L https://github.com/idesyatov/rscan/releases/latest/download/rscan-linux-amd64 -o rscan
-chmod +x rscan
-sudo mv rscan /usr/local/bin/
+VERSION=v0.7.2  # check latest at https://github.com/idesyatov/rscan/releases
+curl -L https://github.com/idesyatov/rscan/releases/download/${VERSION}/rscan-${VERSION}-linux-amd64.tar.gz -o rscan.tar.gz
+tar xzf rscan.tar.gz
+sudo mv rscan-${VERSION}-linux-amd64/rscan /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri https://github.com/idesyatov/rscan/releases/latest/download/rscan-windows-amd64.exe -OutFile rscan.exe
+$VERSION = "v0.7.2"  # check latest at https://github.com/idesyatov/rscan/releases
+Invoke-WebRequest -Uri "https://github.com/idesyatov/rscan/releases/download/$VERSION/rscan-$VERSION-windows-amd64.zip" -OutFile rscan.zip
+Expand-Archive rscan.zip -DestinationPath .
+# Binary is in rscan-$VERSION-windows-amd64\rscan.exe
 ```
 
 ### Build from source
