@@ -232,7 +232,8 @@ async fn main() {
         if cli.verbose {
             eprintln!("Running host discovery...");
         }
-        hosts = scanner::discover_hosts(&hosts, ping_timeout, cli.threads, cli.verbose).await;
+        let suppress_ping_progress = cli.quiet || cli.json;
+        hosts = scanner::discover_hosts(&hosts, ping_timeout, cli.threads, cli.verbose, suppress_ping_progress).await;
         if hosts.is_empty() {
             eprintln!("No alive hosts found.");
             std::process::exit(0);
@@ -240,10 +241,12 @@ async fn main() {
     }
 
     // Build scan config
+    let suppress_progress = cli.quiet || cli.json;
     let config = scanner::ScanConfig {
         conn_timeout: Duration::from_millis(cli.timeout),
         concurrency: cli.threads,
         verbose: cli.verbose,
+        quiet: suppress_progress,
         grab_banners: cli.banner,
         retries: cli.retry,
         rate_limit: cli.rate,

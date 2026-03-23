@@ -22,6 +22,7 @@ pub struct ScanConfig {
     pub conn_timeout: Duration,
     pub concurrency: usize,
     pub verbose: bool,
+    pub quiet: bool,
     pub grab_banners: bool,
     pub retries: u32,
     pub rate_limit: Option<u32>, // max connections per second, None = unlimited
@@ -48,11 +49,11 @@ pub async fn ping_host(ip: Ipv4Addr, timeout_dur: Duration) -> bool {
 }
 
 /// Discover alive hosts from a list using TCP ping.
-pub async fn discover_hosts(hosts: &[Ipv4Addr], timeout_dur: Duration, concurrency: usize, verbose: bool) -> Vec<Ipv4Addr> {
+pub async fn discover_hosts(hosts: &[Ipv4Addr], timeout_dur: Duration, concurrency: usize, verbose: bool, quiet: bool) -> Vec<Ipv4Addr> {
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let total = hosts.len();
 
-    let progress = if verbose {
+    let progress = if !quiet {
         let pb = ProgressBar::new(total as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} Host discovery [{bar:30.cyan/dim}] {pos}/{len} [{elapsed_precise}<{eta_precise}]")
@@ -201,7 +202,7 @@ pub async fn scan(
         if r == 0 { Duration::from_secs(0) } else { Duration::from_secs_f64(1.0 / r as f64) }
     });
 
-    let progress = if config.verbose {
+    let progress = if !config.quiet {
         let pb = ProgressBar::new(total as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} Scanning [{bar:30.cyan/dim}] {pos}/{len} [{elapsed_precise}<{eta_precise}] {per_sec}")
